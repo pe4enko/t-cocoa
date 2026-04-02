@@ -127,6 +127,19 @@ docker compose -f compose.ghcr.yaml pull
 docker compose -f compose.ghcr.yaml up -d
 ```
 
+Или одной командой через скрипт [update-ghcr.sh](/Users/ma.martynov/work/t-cocoa/update-ghcr.sh):
+
+```bash
+chmod +x update-ghcr.sh
+./update-ghcr.sh
+```
+
+Если нужно заодно чистить старые dangling images:
+
+```bash
+PRUNE_OLD_IMAGES=true ./update-ghcr.sh
+```
+
 Если пакет в GHCR будет приватным, для входа на VPS нужен GitHub token с правом `read:packages`. Если сделаете пакет публичным, pull можно будет упростить.
 
 ## Важные замечания

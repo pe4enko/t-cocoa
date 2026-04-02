@@ -42,7 +42,7 @@ export class MoexIssService {
       "SECID,LAST,MARKETPRICE,SETTLEPRICE,UPDATETIME,SYSTIME,TRADEDATE,TRADE_SESSION_DATE"
     );
 
-    const response = await fetch(url);
+    const response = await this.fetchMoex(url);
     if (!response.ok) {
       throw new Error(`MOEX ISS request failed with status ${response.status}.`);
     }
@@ -86,7 +86,7 @@ export class MoexIssService {
     );
     url.searchParams.set("limit", "1000");
 
-    const response = await fetch(url);
+    const response = await this.fetchMoex(url);
     if (!response.ok) {
       throw new Error(`MOEX ISS request failed with status ${response.status}.`);
     }
@@ -129,7 +129,7 @@ export class MoexIssService {
       "SECID,SHORTNAME,ASSETCODE,LASTTRADEDATE,LASTDELDATE"
     );
 
-    const response = await fetch(url);
+    const response = await this.fetchMoex(url);
     if (!response.ok) {
       throw new Error(`MOEX ISS request failed with status ${response.status}.`);
     }
@@ -247,5 +247,30 @@ export class MoexIssService {
     }
 
     return null;
+  }
+
+  private async fetchMoex(url: URL): Promise<Response> {
+    try {
+      return await fetch(url);
+    } catch (error) {
+      throw new Error(
+        `Не удалось получить данные MOEX ISS с ${url.host}. ${this.describeFetchError(error)}.`
+      );
+    }
+  }
+
+  private describeFetchError(error: unknown): string {
+    if (!(error instanceof Error)) {
+      return "Неизвестная ошибка сети";
+    }
+
+    const causeMessage =
+      error.cause instanceof Error
+        ? error.cause.message
+        : typeof error.cause === "string"
+          ? error.cause
+          : null;
+
+    return causeMessage ? `${error.message} (${causeMessage})` : error.message;
   }
 }

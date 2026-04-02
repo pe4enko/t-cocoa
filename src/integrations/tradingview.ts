@@ -119,19 +119,32 @@ export class TradingViewService {
   private async fetchCandles(
     symbols: string[]
   ): Promise<Array<Candle[] | undefined>> {
-    const connection = await TradingViewWs.connect(
-      this.config.tradingViewSessionId
-        ? { sessionId: this.config.tradingViewSessionId }
-        : {}
-    );
+    let connection;
+    try {
+      connection = await TradingViewWs.connect(
+        this.config.tradingViewSessionId
+          ? { sessionId: this.config.tradingViewSessionId }
+          : {}
+      );
+    } catch (error) {
+      throw new Error(
+        `Не удалось подключиться к TradingView. ${this.describeError(error)}.`
+      );
+    }
 
     try {
-      return await TradingViewWs.getCandles({
-        connection,
-        symbols,
-        amount: this.config.lookbackBars,
-        timeframe: this.config.timeframeMinutes
-      });
+      try {
+        return await TradingViewWs.getCandles({
+          connection,
+          symbols,
+          amount: this.config.lookbackBars,
+          timeframe: this.config.timeframeMinutes
+        });
+      } catch (error) {
+        throw new Error(
+          `Не удалось получить котировки из TradingView. ${this.describeError(error)}.`
+        );
+      }
     } finally {
       await connection.close();
     }
@@ -199,5 +212,20 @@ export class TradingViewService {
 
   private getCandleCloseUnix(candle: Candle): number {
     return candle.timestamp + this.config.timeframeMinutes * 60;
+  }
+
+  private describeError(error: unknown): string {
+    if (!(error instanceof Error)) {
+      return "Неизвестная ошибка";
+    }
+
+    const causeMessage =
+      error.cause instanceof Error
+        ? error.cause.message
+        : typeof error.cause === "string"
+          ? error.cause
+          : null;
+
+    return causeMessage ? `${error.message} (${causeMessage})` : error.message;
   }
 }

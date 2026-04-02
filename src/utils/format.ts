@@ -57,43 +57,51 @@ export function formatCocoaReport(
 function buildDetailsBlock(report: CocoaReport, signal: TradingSignal): string {
   const { snapshot, calculation, fairBasis } = report;
   const worldCloseRub = (calculation.worldCloseUsd * calculation.usdRubRate) / 1000;
+  const fairLocalPriceRubFormula = `${formatDecimal(calculation.usdRubRate)} × ${formatDecimal(calculation.fairWorldPriceUsd)} / 1000 = ${formatDecimal(calculation.fairLocalPriceRub)} ₽`;
   const lines = [
-    `<b>Детали расчета</b>`,
+    `${formatSectionHeader("Детали расчета")}`,
     ``,
-    `<b>Сигнал</b>`,
-    `${escapeHtml(signal.label)}`,
-    `${escapeHtml(signal.reason)}`,
+    `${formatSectionHeader("Сигнал")}`,
+    `${formatDetailValue("Рекомендация", escapeHtml(signal.label))}`,
+    `${formatDetailValue("Комментарий", escapeHtml(signal.reason))}`,
     ``,
-    `<b>Контракт</b>`,
-    `${escapeHtml(snapshot.localCocoa.symbol)} (${escapeHtml(snapshot.localCocoa.displaySymbol)})`,
+    `${formatSectionHeader("Контракт")}`,
+    `${formatDetailValue("Контракт", `${escapeHtml(snapshot.localCocoa.symbol)} (${escapeHtml(snapshot.localCocoa.displaySymbol)})`)}`,
     ``,
-    `<b>Исходные данные</b>`,
-    `Локальная цена: ${formatDecimal(calculation.localPriceRub)} ₽`,
-    `Зарубежное какао на закрытии: ${formatDecimal(calculation.worldCloseUsd)} $ (${formatDecimal(worldCloseRub)} ₽ без базиса)`,
-    `Курс доллара (${escapeHtml(snapshot.usdRub.symbol)}): ${formatDecimal(calculation.usdRubRate)}`,
+    `${formatSectionHeader("Исходные данные")}`,
+    `${formatDetailValue("Локальная цена", `${formatDecimal(calculation.localPriceRub)} ₽`)}`,
+    `${formatDetailValue("Зарубежное какао на закрытии", `${formatDecimal(calculation.worldCloseUsd)} $ (${formatDecimal(worldCloseRub)} ₽ без базиса)`)}`,
+    `${formatDetailValue(`Курс доллара (${escapeHtml(snapshot.usdRub.symbol)})`, formatDecimal(calculation.usdRubRate))}`,
     ``,
-    `<b>Базис</b>`,
-    `<b>Текущий базис:</b> ${formatSignedDecimal(calculation.currentBasisUsd)} $`,
-    `Это фактическая разница между локальным контрактом в долларах и закрытием COCOA.`,
-    `Формула: локальный контракт в $ - COCOA close`,
-    `${formatDecimal(calculation.localPriceUsd)} - ${formatDecimal(calculation.worldCloseUsd)} = ${formatSignedDecimal(calculation.currentBasisUsd)} $`,
+    `${formatSectionHeader("Преобразование")}`,
+    `${formatDetailValue("Локальный контракт в долларах", `${formatDecimal(calculation.localPriceUsd)} $`)}`,
+    `${formatDetailValue("Формула", "локальная цена × 1000 / курс доллара")}`,
+    `${formatDetailValue("Подстановка", `${formatDecimal(calculation.localPriceRub)} × 1000 / ${formatDecimal(calculation.usdRubRate)} = ${formatDecimal(calculation.localPriceUsd)} $`)}`,
     ``,
-    `<b>Расчетный базис:</b> ${formatSignedDecimal(calculation.fairBasisUsd)} $`,
-    `Это модельная оценка справедливого базиса с учетом ставки и времени до экспирации.`,
-    `Формула: COCOA close × ставка × дни до экспирации / база_дней`,
-    `${formatDecimal(calculation.worldCloseUsd)} × ${formatDecimal(fairBasis.annualRatePct)}% × ${formatDecimal(fairBasis.daysToExpiry)} / ${formatDecimal(fairBasis.dayCountBasis)} = ${formatDecimal(calculation.fairBasisUsd)} $`,
-    `${formatFairBasisExplanation(fairBasis)}`,
-    `Отклонение текущего базиса от расчетного: ${formatSignedDecimal(calculation.basisDeviationUsd)} $`,
+    `${formatSectionHeader("Базис")}`,
+    `${formatDetailValue("Текущий базис", `${formatSignedDecimal(calculation.currentBasisUsd)} $`)}`,
+    `${formatDetailValue("Формула", "локальный контракт в $ - COCOA close")}`,
+    `${formatDetailValue("Подстановка", `${formatDecimal(calculation.localPriceUsd)} - ${formatDecimal(calculation.worldCloseUsd)} = ${formatSignedDecimal(calculation.currentBasisUsd)} $`)}`,
     ``,
-    `<b>Справедливая цена</b>`,
-    `Локальный контракт в долларах: ${formatDecimal(calculation.localPriceUsd)} $`,
-    `Справедливая цена локального контракта в долларах: ${formatDecimal(calculation.fairWorldPriceUsd)} $`,
-    `Локальный контракт: ${formatFairPriceDeviation(calculation.rubDeviationFromFairPrice, signal.spreadPct)}`,
+    `${formatDetailValue("Расчетный базис", `${formatSignedDecimal(calculation.fairBasisUsd)} $`)}`,
+    `${formatDetailValue("Формула", "COCOA close × ставка × дни до экспирации / база_дней")}`,
+    `${formatDetailValue("Подстановка", `${formatDecimal(calculation.worldCloseUsd)} × ${formatDecimal(fairBasis.annualRatePct)}% × ${formatDecimal(fairBasis.daysToExpiry)} / ${formatDecimal(fairBasis.dayCountBasis)} = ${formatDecimal(calculation.fairBasisUsd)} $`)}`,
+    `${formatDetailValue("Источник ставки", formatFairBasisExplanation(fairBasis))}`,
+    `${formatDetailValue("Отклонение от текущего базиса", `${formatSignedDecimal(calculation.basisDeviationUsd)} $`)}`,
     ``,
-    `<b>Источники и время</b>`,
-    `Локальная цена: ${escapeHtml(snapshot.localCocoa.sourceLabel)}, ${formatDateTime(snapshot.localCocoa.observedAt)} МСК`,
-    `${escapeHtml(snapshot.usdRub.symbol)}: ${escapeHtml(snapshot.usdRub.sourceLabel)}, ${formatDateTime(snapshot.usdRub.observedAt)} МСК`,
-    `${escapeHtml(snapshot.worldClose.symbol)}: ${escapeHtml(snapshot.worldClose.sourceLabel)}, ${formatDateTime(snapshot.worldClose.observedAt)} МСК`
+    `${formatSectionHeader("Справедливая цена")}`,
+    `${formatDetailValue("Справедливая цена в долларах", `${formatDecimal(calculation.fairWorldPriceUsd)} $`)}`,
+    `${formatDetailValue("Формула", "COCOA close + расчетный базис")}`,
+    `${formatDetailValue("Подстановка", `${formatDecimal(calculation.worldCloseUsd)} + ${formatDecimal(calculation.fairBasisUsd)} = ${formatDecimal(calculation.fairWorldPriceUsd)} $`)}`,
+    ``,
+    `${formatDetailValue("Справедливая цена в рублях", `${formatDecimal(calculation.fairLocalPriceRub)} ₽`)}`,
+    `${formatDetailValue("Формула", "курс доллара × справедливая цена в $ / 1000")}`,
+    `${formatDetailValue("Подстановка", fairLocalPriceRubFormula)}`,
+    ``,
+    `${formatSectionHeader("Источники и время")}`,
+    `${formatDetailValue("Локальная цена", `${escapeHtml(snapshot.localCocoa.sourceLabel)}, ${formatDateTime(snapshot.localCocoa.observedAt)} МСК`)}`,
+    `${formatDetailValue(escapeHtml(snapshot.usdRub.symbol), `${escapeHtml(snapshot.usdRub.sourceLabel)}, ${formatDateTime(snapshot.usdRub.observedAt)} МСК`)}`,
+    `${formatDetailValue(escapeHtml(snapshot.worldClose.symbol), `${escapeHtml(snapshot.worldClose.sourceLabel)}, ${formatDateTime(snapshot.worldClose.observedAt)} МСК`)}`
   ];
 
   if (!hasSameMinute(snapshot.worldClose.observedAt, snapshot.foreignCloseTarget)) {
@@ -107,14 +115,22 @@ function buildDetailsBlock(report: CocoaReport, signal: TradingSignal): string {
 
 function formatFairBasisExplanation(fairBasis: FairBasisResult): string {
   const parts = [
-    `Источник ставки: ${fairBasis.rateSourceLabel}`
+    fairBasis.rateSourceLabel
   ];
 
   if (fairBasis.rateObservedAt) {
-    parts.push(`дата ставки: ${fairBasis.rateObservedAt.toFormat("dd.MM.yyyy")}`);
+    parts.push(`дата ${fairBasis.rateObservedAt.toFormat("dd.MM.yyyy")}`);
   }
 
   return parts.join(", ");
+}
+
+function formatSectionHeader(value: string): string {
+  return `<b><i>${value}</i></b>`;
+}
+
+function formatDetailValue(label: string, value: string): string {
+  return `<b>${label}:</b> ${value}`;
 }
 
 function escapeHtml(value: string): string {

@@ -40,7 +40,15 @@ export class CbrKeyRateService {
   }
 
   private async fetchCurrentKeyRate(): Promise<KeyRateSnapshot> {
-    const response = await fetch(this.config.fairBasis.cbrKeyRateUrl);
+    let response: Response;
+    try {
+      response = await fetch(this.config.fairBasis.cbrKeyRateUrl);
+    } catch (error) {
+      throw new Error(
+        `Не удалось получить ключевую ставку ЦБ РФ с ${new URL(this.config.fairBasis.cbrKeyRateUrl).host}. ${this.describeFetchError(error)}. Можно временно задать FAIR_BASIS_RATE_PCT вручную в .env.`
+      );
+    }
+
     if (!response.ok) {
       throw new Error(
         `Не удалось получить ключевую ставку ЦБ РФ: HTTP ${response.status}.`
@@ -51,6 +59,21 @@ export class CbrKeyRateService {
     const snapshot = this.parseKeyRateHtml(html);
 
     return snapshot;
+  }
+
+  private describeFetchError(error: unknown): string {
+    if (!(error instanceof Error)) {
+      return "Неизвестная ошибка сети";
+    }
+
+    const causeMessage =
+      error.cause instanceof Error
+        ? error.cause.message
+        : typeof error.cause === "string"
+          ? error.cause
+          : null;
+
+    return causeMessage ? `${error.message} (${causeMessage})` : error.message;
   }
 
   private parseKeyRateHtml(html: string): KeyRateSnapshot {

@@ -44,7 +44,6 @@ export function createBot(
         await ctx.reply(getHelpText(), { parse_mode: "HTML" });
         return;
       case "cocoa":
-      case "calc":
         await handleCocoaCommand(ctx, parsedCommand.args, reportService, config);
         return;
       default:
@@ -60,10 +59,6 @@ export async function registerCommands(bot: Bot): Promise<void> {
     {
       command: "cocoa",
       description: "Рассчитать отклонение российского какао"
-    },
-    {
-      command: "help",
-      description: "Показать справку по боту"
     }
   ]);
 }
@@ -105,9 +100,7 @@ async function handleCocoaCommand(
     const message =
       error instanceof Error ? error.message : "Неизвестная ошибка.";
 
-    await ctx.reply(
-      `Не удалось получить расчет.\nПричина: ${message}\n\nПроверьте тикер MOEX для локального какао и символы TradingView для USDRUBF/COCOA.`
-    );
+    await ctx.reply(`Не удалось получить расчет.\nПричина: ${message}`);
   }
 }
 
@@ -166,15 +159,9 @@ function getHelpText(): string {
     `<b>Команды</b>`,
     `/cocoa`,
     `/cocoa CCJ6`,
-    `/calc`,
     ``,
     `Без аргументов бот сам выбирает ближайший неистекший контракт на какао по MOEX.`,
-    `Если первым аргументом передан тикер, например CCJ6, он используется как ручной override.`,
-    `Бот считает расчетный базис автоматически по ставке и времени до экспирации.`,
-    `Если FAIR_BASIS_RATE_PCT пустой, ставка берется автоматически с сайта ЦБ РФ.`,
-    `Кеши можно отключить через CBR_KEY_RATE_CACHE_ENABLED=false и TV_WORLD_CLOSE_CACHE_ENABLED=false.`,
-    `Если FOREIGN_MARKET_HOLIDAYS_MSK заполнен, бот исключает эти даты из календаря зарубежного рынка.`,
-    `Локальная цена берется напрямую с MOEX ISS, а USDRUBF и COCOA остаются на TradingView.`
+    `Если указать тикер, например CCJ6, бот посчитает отчет по этому контракту.`
   ].join("\n");
 }
 

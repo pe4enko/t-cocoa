@@ -1,0 +1,10 @@
+.git
+.idea
+.pnpm-store
+node_modules
+dist
+.env
+.env.*
+compose*.yml
+compose*.yaml
+README.md

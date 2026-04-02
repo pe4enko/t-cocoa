@@ -87,6 +87,48 @@ git pull
 docker compose up -d --build
 ```
 
+## GHCR и VPS без исходников
+
+Проект также подготовлен к публикации образа в GitHub Container Registry через GitHub Actions:
+
+- workflow: [.github/workflows/publish-ghcr.yml](/Users/ma.martynov/work/t-cocoa/.github/workflows/publish-ghcr.yml)
+- deploy compose: [compose.ghcr.yaml](/Users/ma.martynov/work/t-cocoa/compose.ghcr.yaml)
+- целевой образ: `ghcr.io/pe4enko/t-cocoa:latest`
+
+Что происходит:
+
+- при push в `main` GitHub Actions собирает Docker-образ
+- образ публикуется в `ghcr.io/pe4enko/t-cocoa`
+- на VPS не нужны `node`, `pnpm` и исходники проекта
+
+Что нужно на VPS:
+
+1. Установить только Docker и `docker compose`.
+2. Положить на сервер два файла:
+   - `.env`
+   - `compose.ghcr.yaml`
+3. Войти в GHCR:
+
+```bash
+echo <GITHUB_PAT> | docker login ghcr.io -u pe4enko --password-stdin
+```
+
+4. Запустить контейнер:
+
+```bash
+docker compose -f compose.ghcr.yaml pull
+docker compose -f compose.ghcr.yaml up -d
+```
+
+Обновление на VPS:
+
+```bash
+docker compose -f compose.ghcr.yaml pull
+docker compose -f compose.ghcr.yaml up -d
+```
+
+Если пакет в GHCR будет приватным, для входа на VPS нужен GitHub token с правом `read:packages`. Если сделаете пакет публичным, pull можно будет упростить.
+
 ## Важные замечания
 
 - Локальная цена берется не из TradingView, а напрямую из публичного `MOEX ISS` endpoint.

@@ -70,6 +70,8 @@ pnpm start
 - `LIVE_QUOTES_ENABLED` — включает live-режим для локального какао и `USDRUBF` через `T-Bank Invest API`
 - `TBANK_API_TOKEN` — токен `T-Bank Invest API`
 - `TBANK_API_BASE_URL` — базовый URL REST API `T-Bank Invest`
+- `TBANK_CA_CERT_PATH` — путь к CA-сертификату для запросов в `T-Bank`; по умолчанию можно использовать [TINKOFFBANK-ROOTCA.pem](/Users/ma.martynov/work/t-cocoa/certs/TINKOFFBANK-ROOTCA.pem)
+- `TBANK_TLS_VERIFY_ENABLED` — включает проверку TLS-сертификатов для `T-Bank`; для временного обхода проблем с цепочкой сертификатов можно поставить `false`
 - `TBANK_FUTURES_CLASS_CODE` — class code фьючерсов для запросов по тикеру, по умолчанию `SPBFUT`
 - `TBANK_USDRUB_SYMBOL` — тикер долларового фьючерса для live-режима
 - `TBANK_ORDERBOOK_DEPTH` — глубина стакана для live-режима
@@ -101,6 +103,7 @@ pnpm start
 - Docker-образ собирается локально из [Dockerfile](/Users/ma.martynov/work/t-cocoa/Dockerfile)
 - `.env` лежит на сервере рядом с `compose.yaml`
 - `node` и `pnpm` внутри хоста не обязательны
+- сертификат [TINKOFFBANK-ROOTCA.pem](/Users/ma.martynov/work/t-cocoa/certs/TINKOFFBANK-ROOTCA.pem) уже включен в образ и подставляется как дефолтный `TBANK_CA_CERT_PATH`
 
 Команды:
 
@@ -130,6 +133,7 @@ docker compose up -d --build
 - Docker
 - `compose.ghcr.yaml`
 - `.env`
+- корневой сертификат `T-Bank` уже встроен в образ и по умолчанию подставляется как `TBANK_CA_CERT_PATH`
 
 Файл `.env` должен лежать на файловой системе сервера рядом с `compose.ghcr.yaml`. Он не запекается в Docker-образ.
 
@@ -168,6 +172,8 @@ PRUNE_OLD_IMAGES=true ./update-ghcr.sh
 - для локального какао в live-режиме бот сначала пытается использовать лучшие `bid/ask`, а если стакан пустой, падает обратно на `last price`
 - для `USDRUBF` в live-режиме бот берет прямой `last price` из `T-Bank`
 - если `TBANK_API_TOKEN` не задан или `T-Bank Invest API` не ответил, бот автоматически возвращается к старым источникам
+- сертификат [TINKOFFBANK-ROOTCA.pem](/Users/ma.martynov/work/t-cocoa/certs/TINKOFFBANK-ROOTCA.pem) — это публичный self-signed root CA, его можно хранить в репозитории; секретом он не является
+- если в проде возникает TLS-ошибка вроде `self-signed certificate in certificate chain`, сначала обновите образ до версии, где сертификат уже встроен; если этого недостаточно, можно указать другой `TBANK_CA_CERT_PATH`; как временный обход можно использовать `TBANK_TLS_VERIFY_ENABLED=false`
 - через `LIVE_QUOTES_ENABLED=false` можно полностью отключить live-режим
 - контракт выбирается автоматически как ближайший неистекший по `LASTTRADEDATE`
 - если указать тикер вручную, например `/cocoa CCM6`, бот использует именно его

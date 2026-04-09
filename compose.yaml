@@ -8,4 +8,6 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      TBANK_CA_CERT_PATH: ${TBANK_CA_CERT_PATH:-certs/TINKOFFBANK-ROOTCA.pem}
     init: true

@@ -29,6 +29,8 @@ export interface LiveQuoteConfig {
   enabled: boolean;
   tbankApiToken?: string;
   tbankApiBaseUrl: string;
+  tbankCaCertPath?: string;
+  tbankTlsVerifyEnabled: boolean;
   tbankFuturesClassCode: string;
   tbankUsdRubSymbol: string;
   tbankOrderbookDepth: number;
@@ -247,6 +249,8 @@ export const config: AppConfig = {
     tbankApiBaseUrl:
       getOptionalString("TBANK_API_BASE_URL") ??
       "https://invest-public-api.tbank.ru/rest",
+    tbankCaCertPath: getOptionalString("TBANK_CA_CERT_PATH"),
+    tbankTlsVerifyEnabled: getBoolean("TBANK_TLS_VERIFY_ENABLED", true),
     tbankFuturesClassCode:
       getOptionalString("TBANK_FUTURES_CLASS_CODE") ?? "SPBFUT",
     tbankUsdRubSymbol:

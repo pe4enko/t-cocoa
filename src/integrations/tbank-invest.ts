@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { request as httpsRequest } from "node:https";
 import { DateTime } from "luxon";
 
 import type { AppConfig } from "../config";
@@ -57,6 +59,8 @@ interface PriceSelection {
 
 export class TBankInvestService {
   private readonly metadataCache = new Map<string, TBankFutureMetadata>();
+  private customCaPromise?: Promise<string | undefined>;
+  private insecureTlsWarningShown = false;
 
   constructor(private readonly config: AppConfig) {}
 
@@ -285,31 +289,13 @@ export class TBankInvestService {
     const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
     const url = new URL(normalizedPath, baseUrl);
 
-    let response: Response;
     try {
-      response = await fetch(url, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          Accept: "application/json"
-        },
-        body: JSON.stringify(body)
-      });
+      return await this.performJsonRequest<TResponse>(url, token, body);
     } catch (error) {
       throw new Error(
-        `Не удалось получить данные T-Bank Invest API с ${url.host}. ${this.describeFetchError(error)}.`
+        `Не удалось получить данные T-Bank Invest API с ${url.host}. ${this.describeFetchError(error)}. Если на сервере используется нестандартный корневой сертификат, укажите TBANK_CA_CERT_PATH. Для временного обхода можно установить TBANK_TLS_VERIFY_ENABLED=false.`
       );
     }
-
-    if (!response.ok) {
-      const details = await response.text();
-      throw new Error(
-        `T-Bank Invest API request failed with status ${response.status}: ${details.slice(0, 200)}`
-      );
-    }
-
-    return (await response.json()) as TResponse;
   }
 
   private getQuotationNumber(value?: TBankQuotation | null): number | null {
@@ -353,5 +339,106 @@ export class TBankInvestService {
           : null;
 
     return causeMessage ? `${error.message} (${causeMessage})` : error.message;
+  }
+
+  private async performJsonRequest<TResponse>(
+    url: URL,
+    token: string,
+    body: Record<string, unknown>
+  ): Promise<TResponse> {
+    const customCa = await this.getCustomCa();
+    const tlsVerifyEnabled = this.config.liveQuotes.tbankTlsVerifyEnabled;
+
+    if (!customCa && tlsVerifyEnabled) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
+        body: JSON.stringify(body)
+      });
+
+      if (!response.ok) {
+        const details = await response.text();
+        throw new Error(
+          `T-Bank Invest API request failed with status ${response.status}: ${details.slice(0, 200)}`
+        );
+      }
+
+      return (await response.json()) as TResponse;
+    }
+
+    const rawBody = JSON.stringify(body);
+
+    if (!tlsVerifyEnabled && !this.insecureTlsWarningShown) {
+      this.insecureTlsWarningShown = true;
+      console.warn(
+        "[T-Bank live quotes] TLS certificate verification is disabled via TBANK_TLS_VERIFY_ENABLED=false. Use only as a temporary workaround."
+      );
+    }
+
+    return await new Promise<TResponse>((resolve, reject) => {
+      const req = httpsRequest(
+        url,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            "Content-Length": Buffer.byteLength(rawBody)
+          },
+          ca: customCa,
+          rejectUnauthorized: tlsVerifyEnabled
+        },
+        (res) => {
+          let responseBody = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk) => {
+            responseBody += chunk;
+          });
+          res.on("end", () => {
+            const statusCode = res.statusCode ?? 0;
+
+            if (statusCode < 200 || statusCode >= 300) {
+              reject(
+                new Error(
+                  `T-Bank Invest API request failed with status ${statusCode}: ${responseBody.slice(0, 200)}`
+                )
+              );
+              return;
+            }
+
+            try {
+              resolve(JSON.parse(responseBody) as TResponse);
+            } catch (error) {
+              reject(
+                error instanceof Error
+                  ? error
+                  : new Error("Failed to parse T-Bank Invest API response.")
+              );
+            }
+          });
+        }
+      );
+
+      req.on("error", reject);
+      req.write(rawBody);
+      req.end();
+    });
+  }
+
+  private async getCustomCa(): Promise<string | undefined> {
+    if (!this.config.liveQuotes.tbankCaCertPath) {
+      return undefined;
+    }
+
+    if (!this.customCaPromise) {
+      this.customCaPromise = readFile(this.config.liveQuotes.tbankCaCertPath, "utf8");
+    }
+
+    return this.customCaPromise;
   }
 }

@@ -1,5 +1,7 @@
-import { readFile } from "node:fs/promises";
+import { X509Certificate } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
 import { request as httpsRequest } from "node:https";
+import { isAbsolute, resolve } from "node:path";
 import { DateTime } from "luxon";
 
 import type { AppConfig } from "../config";
@@ -57,10 +59,24 @@ interface PriceSelection {
   sourceLabel: string;
 }
 
+interface CustomCaDetails {
+  pem: string;
+  configuredPath: string;
+  resolvedPath: string;
+  sizeBytes: number;
+  certificateCount: number;
+  firstCertificateSubject: string | null;
+  firstCertificateIssuer: string | null;
+  firstCertificateValidFrom: string | null;
+  firstCertificateValidTo: string | null;
+  firstCertificateFingerprint256: string | null;
+}
+
 export class TBankInvestService {
   private readonly metadataCache = new Map<string, TBankFutureMetadata>();
-  private customCaPromise?: Promise<string | undefined>;
+  private customCaPromise?: Promise<CustomCaDetails | undefined>;
   private insecureTlsWarningShown = false;
+  private tlsConfigurationLogged = false;
 
   constructor(private readonly config: AppConfig) {}
 
@@ -348,26 +364,37 @@ export class TBankInvestService {
   ): Promise<TResponse> {
     const customCa = await this.getCustomCa();
     const tlsVerifyEnabled = this.config.liveQuotes.tbankTlsVerifyEnabled;
+    const transport =
+      !customCa && tlsVerifyEnabled
+        ? "fetch/system-trust-store"
+        : "https-request/custom-tls-options";
+
+    this.logTlsConfiguration(url, transport, customCa);
 
     if (!customCa && tlsVerifyEnabled) {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          Accept: "application/json"
-        },
-        body: JSON.stringify(body)
-      });
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            Accept: "application/json"
+          },
+          body: JSON.stringify(body)
+        });
 
-      if (!response.ok) {
-        const details = await response.text();
-        throw new Error(
-          `T-Bank Invest API request failed with status ${response.status}: ${details.slice(0, 200)}`
-        );
+        if (!response.ok) {
+          const details = await response.text();
+          throw new Error(
+            `T-Bank Invest API request failed with status ${response.status}: ${details.slice(0, 200)}`
+          );
+        }
+
+        return (await response.json()) as TResponse;
+      } catch (error) {
+        this.logRequestFailure(url, transport, customCa, error);
+        throw error;
       }
-
-      return (await response.json()) as TResponse;
     }
 
     const rawBody = JSON.stringify(body);
@@ -379,7 +406,7 @@ export class TBankInvestService {
       );
     }
 
-    return await new Promise<TResponse>((resolve, reject) => {
+    return await new Promise<TResponse>((resolvePromise, rejectPromise) => {
       const req = httpsRequest(
         url,
         {
@@ -390,7 +417,7 @@ export class TBankInvestService {
             Accept: "application/json",
             "Content-Length": Buffer.byteLength(rawBody)
           },
-          ca: customCa,
+          ca: customCa?.pem,
           rejectUnauthorized: tlsVerifyEnabled
         },
         (res) => {
@@ -403,42 +430,253 @@ export class TBankInvestService {
             const statusCode = res.statusCode ?? 0;
 
             if (statusCode < 200 || statusCode >= 300) {
-              reject(
-                new Error(
-                  `T-Bank Invest API request failed with status ${statusCode}: ${responseBody.slice(0, 200)}`
-                )
+              const error = new Error(
+                `T-Bank Invest API request failed with status ${statusCode}: ${responseBody.slice(0, 200)}`
               );
+              this.logRequestFailure(url, transport, customCa, error);
+              rejectPromise(error);
               return;
             }
 
             try {
-              resolve(JSON.parse(responseBody) as TResponse);
+              resolvePromise(JSON.parse(responseBody) as TResponse);
             } catch (error) {
-              reject(
+              const parseError =
                 error instanceof Error
                   ? error
-                  : new Error("Failed to parse T-Bank Invest API response.")
-              );
+                  : new Error("Failed to parse T-Bank Invest API response.");
+              this.logRequestFailure(url, transport, customCa, parseError);
+              rejectPromise(parseError);
             }
           });
         }
       );
 
-      req.on("error", reject);
+      req.on("error", (error) => {
+        this.logRequestFailure(url, transport, customCa, error);
+        rejectPromise(error);
+      });
       req.write(rawBody);
       req.end();
     });
   }
 
-  private async getCustomCa(): Promise<string | undefined> {
+  private async getCustomCa(): Promise<CustomCaDetails | undefined> {
     if (!this.config.liveQuotes.tbankCaCertPath) {
       return undefined;
     }
 
     if (!this.customCaPromise) {
-      this.customCaPromise = readFile(this.config.liveQuotes.tbankCaCertPath, "utf8");
+      this.customCaPromise = this.loadCustomCa(
+        this.config.liveQuotes.tbankCaCertPath
+      );
     }
 
     return this.customCaPromise;
+  }
+
+  private async loadCustomCa(configuredPath: string): Promise<CustomCaDetails> {
+    const attemptedPaths = this.getCustomCaCandidatePaths(configuredPath);
+    const loadErrors: Array<Record<string, unknown>> = [];
+
+    for (const candidatePath of attemptedPaths) {
+      try {
+        const [pem, stats] = await Promise.all([
+          readFile(candidatePath, "utf8"),
+          stat(candidatePath)
+        ]);
+        const certificateCount =
+          pem.match(/-----BEGIN CERTIFICATE-----/g)?.length ?? 0;
+
+        return {
+          pem,
+          configuredPath,
+          resolvedPath: candidatePath,
+          sizeBytes: stats.size,
+          certificateCount,
+          ...this.getFirstCertificateMetadata(pem)
+        };
+      } catch (error) {
+        loadErrors.push({
+          path: candidatePath,
+          error: this.getErrorDiagnostics(error)
+        });
+      }
+    }
+
+    console.error("[T-Bank live quotes] Failed to load custom CA certificate.", {
+      configuredPath,
+      attemptedPaths,
+      cwd: process.cwd(),
+      appRoot: this.getAppRoot(),
+      errorCount: loadErrors.length,
+      errors: loadErrors
+    });
+
+    throw new Error(
+      `Failed to load custom CA certificate from ${configuredPath}.`
+    );
+  }
+
+  private getCustomCaCandidatePaths(configuredPath: string): string[] {
+    if (isAbsolute(configuredPath)) {
+      return [configuredPath];
+    }
+
+    return [...new Set([
+      resolve(process.cwd(), configuredPath),
+      resolve(this.getAppRoot(), configuredPath)
+    ])];
+  }
+
+  private getAppRoot(): string {
+    return resolve(__dirname, "..", "..");
+  }
+
+  private getFirstCertificateMetadata(
+    pem: string
+  ): Omit<CustomCaDetails, "pem" | "configuredPath" | "resolvedPath" | "sizeBytes" | "certificateCount"> {
+    const firstCertificateMatch = pem.match(
+      /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/
+    );
+
+    if (!firstCertificateMatch) {
+      return {
+        firstCertificateSubject: null,
+        firstCertificateIssuer: null,
+        firstCertificateValidFrom: null,
+        firstCertificateValidTo: null,
+        firstCertificateFingerprint256: null
+      };
+    }
+
+    try {
+      const certificate = new X509Certificate(firstCertificateMatch[0]);
+
+      return {
+        firstCertificateSubject: certificate.subject,
+        firstCertificateIssuer: certificate.issuer,
+        firstCertificateValidFrom: certificate.validFrom,
+        firstCertificateValidTo: certificate.validTo,
+        firstCertificateFingerprint256: certificate.fingerprint256
+      };
+    } catch (error) {
+      console.warn(
+        "[T-Bank live quotes] Failed to parse custom CA certificate metadata.",
+        {
+          error: this.getErrorDiagnostics(error)
+        }
+      );
+
+      return {
+        firstCertificateSubject: null,
+        firstCertificateIssuer: null,
+        firstCertificateValidFrom: null,
+        firstCertificateValidTo: null,
+        firstCertificateFingerprint256: null
+      };
+    }
+  }
+
+  private logTlsConfiguration(
+    url: URL,
+    transport: string,
+    customCa: CustomCaDetails | undefined
+  ): void {
+    if (this.tlsConfigurationLogged) {
+      return;
+    }
+
+    this.tlsConfigurationLogged = true;
+
+    console.info("[T-Bank live quotes] TLS configuration.", {
+      baseUrl: url.origin,
+      host: url.host,
+      transport,
+      tlsVerifyEnabled: this.config.liveQuotes.tbankTlsVerifyEnabled,
+      configuredCaPath: this.config.liveQuotes.tbankCaCertPath ?? null,
+      loadedCaPath: customCa?.resolvedPath ?? null,
+      customCaLoaded: Boolean(customCa),
+      customCaSizeBytes: customCa?.sizeBytes ?? null,
+      customCaCertificateCount: customCa?.certificateCount ?? null,
+      customCaSubject: customCa?.firstCertificateSubject ?? null,
+      customCaIssuer: customCa?.firstCertificateIssuer ?? null,
+      customCaValidFrom: customCa?.firstCertificateValidFrom ?? null,
+      customCaValidTo: customCa?.firstCertificateValidTo ?? null,
+      customCaFingerprint256: customCa?.firstCertificateFingerprint256 ?? null,
+      cwd: process.cwd(),
+      appRoot: this.getAppRoot(),
+      nodeVersion: process.version,
+      nodeEnv: process.env.NODE_ENV ?? null,
+      nodeExtraCaCerts: process.env.NODE_EXTRA_CA_CERTS ?? null
+    });
+  }
+
+  private logRequestFailure(
+    url: URL,
+    transport: string,
+    customCa: CustomCaDetails | undefined,
+    error: unknown
+  ): void {
+    console.error("[T-Bank live quotes] Request failed.", {
+      url: url.toString(),
+      host: url.host,
+      path: url.pathname,
+      transport,
+      tlsVerifyEnabled: this.config.liveQuotes.tbankTlsVerifyEnabled,
+      configuredCaPath: this.config.liveQuotes.tbankCaCertPath ?? null,
+      loadedCaPath: customCa?.resolvedPath ?? null,
+      customCaLoaded: Boolean(customCa),
+      error: this.getErrorDiagnostics(error)
+    });
+  }
+
+  private getErrorDiagnostics(error: unknown): Record<string, unknown> {
+    if (!(error instanceof Error)) {
+      return {
+        type: typeof error,
+        value: String(error)
+      };
+    }
+
+    const systemError = error as Error & {
+      code?: unknown;
+      errno?: unknown;
+      syscall?: unknown;
+      path?: unknown;
+      cause?: unknown;
+    };
+    const diagnostics: Record<string, unknown> = {
+      name: systemError.name,
+      message: systemError.message
+    };
+
+    if (systemError.code !== undefined) {
+      diagnostics.code = systemError.code;
+    }
+
+    if (systemError.errno !== undefined) {
+      diagnostics.errno = systemError.errno;
+    }
+
+    if (systemError.syscall !== undefined) {
+      diagnostics.syscall = systemError.syscall;
+    }
+
+    if (systemError.path !== undefined) {
+      diagnostics.path = systemError.path;
+    }
+
+    if (systemError.stack) {
+      diagnostics.stack = systemError.stack.split("\n").slice(0, 6).join("\n");
+    }
+
+    if (systemError.cause instanceof Error) {
+      diagnostics.cause = this.getErrorDiagnostics(systemError.cause);
+    } else if (typeof systemError.cause === "string") {
+      diagnostics.cause = systemError.cause;
+    }
+
+    return diagnostics;
   }
 }

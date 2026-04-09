@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const MOSCOW_TIME_ZONE = "Europe/Moscow";
+const DEFAULT_TBANK_CA_CERT_PATH = "certs/TINKOFFBANK-ROOTCA.pem";
 
 export interface SignalThresholds {
   neutralSpreadRub: number;
@@ -249,7 +250,8 @@ export const config: AppConfig = {
     tbankApiBaseUrl:
       getOptionalString("TBANK_API_BASE_URL") ??
       "https://invest-public-api.tbank.ru/rest",
-    tbankCaCertPath: getOptionalString("TBANK_CA_CERT_PATH"),
+    tbankCaCertPath:
+      getOptionalString("TBANK_CA_CERT_PATH") ?? DEFAULT_TBANK_CA_CERT_PATH,
     tbankTlsVerifyEnabled: getBoolean("TBANK_TLS_VERIFY_ENABLED", true),
     tbankFuturesClassCode:
       getOptionalString("TBANK_FUTURES_CLASS_CODE") ?? "SPBFUT",

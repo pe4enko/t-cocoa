@@ -23,49 +23,31 @@ interface MoexContractDescriptor {
 export class MoexIssService {
   constructor(private readonly config: AppConfig) {}
 
-  async getLocalCocoaSnapshot(symbolOverride?: string): Promise<QuoteSnapshot> {
+  async resolveLocalCocoaContract(symbolOverride?: string): Promise<QuoteSnapshot> {
     const contract = symbolOverride?.trim()
       ? await this.getContractBySymbol(symbolOverride)
       : await this.getActiveContractByAssetCode(this.config.ruCocoaAssetCode);
 
-    const symbol = contract.symbol;
-    const url = new URL(
-      `/iss/engines/futures/markets/forts/securities/${encodeURIComponent(symbol)}.json`,
-      this.config.moexIssBaseUrl
-    );
+    return {
+      symbol: contract.symbol,
+      displaySymbol: contract.displaySymbol,
+      price: 0,
+      observedAt: contract.expiresAt.startOf("day"),
+      sourceLabel: "MOEX ISS",
+      expiresAt: contract.expiresAt
+    };
+  }
 
-    url.searchParams.set("iss.meta", "off");
-    url.searchParams.set("iss.only", "securities,marketdata");
-    url.searchParams.set("securities.columns", "SECID,SHORTNAME");
-    url.searchParams.set(
-      "marketdata.columns",
-      "SECID,LAST,MARKETPRICE,SETTLEPRICE,UPDATETIME,SYSTIME,TRADEDATE,TRADE_SESSION_DATE"
-    );
-
-    const response = await this.fetchMoex(url);
-    if (!response.ok) {
-      throw new Error(`MOEX ISS request failed with status ${response.status}.`);
-    }
-
-    const payload = (await response.json()) as MoexFuturesResponse;
-    const marketRow = this.getFirstRow(payload.marketdata, symbol);
-
-    const price = this.pickFirstNumber(marketRow, [
-      "LAST",
-      "MARKETPRICE",
-      "SETTLEPRICE"
-    ]);
-
-    if (price === null) {
-      throw new Error(`MOEX ISS did not return a price for ${symbol}.`);
-    }
+  async getLocalCocoaSnapshot(symbolOverride?: string): Promise<QuoteSnapshot> {
+    const contract = await this.resolveLocalCocoaContract(symbolOverride);
+    const snapshot = await this.getFuturesSnapshotBySymbol(contract.symbol);
 
     return {
-      symbol,
+      symbol: contract.symbol,
       displaySymbol: contract.displaySymbol,
-      price,
-      observedAt: this.resolveObservedAt(marketRow),
-      sourceLabel: "MOEX ISS",
+      price: snapshot.price,
+      observedAt: snapshot.observedAt,
+      sourceLabel: snapshot.sourceLabel,
       expiresAt: contract.expiresAt
     };
   }
@@ -247,6 +229,49 @@ export class MoexIssService {
     }
 
     return null;
+  }
+
+  private async getFuturesSnapshotBySymbol(symbol: string): Promise<QuoteSnapshot> {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    const url = new URL(
+      `/iss/engines/futures/markets/forts/securities/${encodeURIComponent(normalizedSymbol)}.json`,
+      this.config.moexIssBaseUrl
+    );
+
+    url.searchParams.set("iss.meta", "off");
+    url.searchParams.set("iss.only", "securities,marketdata");
+    url.searchParams.set("securities.columns", "SECID,SHORTNAME");
+    url.searchParams.set(
+      "marketdata.columns",
+      "SECID,LAST,MARKETPRICE,SETTLEPRICE,UPDATETIME,SYSTIME,TRADEDATE,TRADE_SESSION_DATE"
+    );
+
+    const response = await this.fetchMoex(url);
+    if (!response.ok) {
+      throw new Error(`MOEX ISS request failed with status ${response.status}.`);
+    }
+
+    const payload = (await response.json()) as MoexFuturesResponse;
+    const securityRow = this.getFirstRow(payload.securities, normalizedSymbol);
+    const marketRow = this.getFirstRow(payload.marketdata, normalizedSymbol);
+    const displaySymbol = this.getString(securityRow, "SHORTNAME") ?? normalizedSymbol;
+    const price = this.pickFirstNumber(marketRow, [
+      "LAST",
+      "MARKETPRICE",
+      "SETTLEPRICE"
+    ]);
+
+    if (price === null) {
+      throw new Error(`MOEX ISS did not return a price for ${normalizedSymbol}.`);
+    }
+
+    return {
+      symbol: normalizedSymbol,
+      displaySymbol,
+      price,
+      observedAt: this.resolveObservedAt(marketRow),
+      sourceLabel: "MOEX ISS"
+    };
   }
 
   private async fetchMoex(url: URL): Promise<Response> {

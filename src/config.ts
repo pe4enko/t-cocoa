@@ -25,6 +25,15 @@ export interface CacheConfig {
   worldCloseEnabled: boolean;
 }
 
+export interface LiveQuoteConfig {
+  enabled: boolean;
+  tbankApiToken?: string;
+  tbankApiBaseUrl: string;
+  tbankFuturesClassCode: string;
+  tbankUsdRubSymbol: string;
+  tbankOrderbookDepth: number;
+}
+
 export interface ClockTime {
   hour: number;
   minute: number;
@@ -36,6 +45,7 @@ export interface AppConfig {
   ruCocoaAssetCode: string;
   usdRubSymbol: string;
   worldCocoaSymbol: string;
+  foreignMarketSessionCheckEnabled: boolean;
   foreignOpenTimeMsk: ClockTime;
   foreignCloseTimeMsk: ClockTime;
   foreignMarketHolidaysMsk: Set<string>;
@@ -48,6 +58,7 @@ export interface AppConfig {
   signalThresholds: SignalThresholds;
   fairBasis: FairBasisConfig;
   cache: CacheConfig;
+  liveQuotes: LiveQuoteConfig;
 }
 
 function getRequiredString(name: string): string {
@@ -198,6 +209,10 @@ export const config: AppConfig = {
   ruCocoaAssetCode: getOptionalString("RU_COCOA_ASSET_CODE") ?? "COCOA",
   usdRubSymbol: getOptionalString("TV_USDRUBF_SYMBOL") ?? "USDRUBF",
   worldCocoaSymbol: getOptionalString("TV_WORLD_COCOA_SYMBOL") ?? "COCOA",
+  foreignMarketSessionCheckEnabled: getBoolean(
+    "FOREIGN_MARKET_SESSION_CHECK_ENABLED",
+    true
+  ),
   foreignOpenTimeMsk: getTime("FOREIGN_OPEN_TIME_MSK", "11:45"),
   foreignCloseTimeMsk: getTime("FOREIGN_CLOSE_TIME_MSK", "20:29"),
   foreignMarketHolidaysMsk: getOptionalIsoDateSet("FOREIGN_MARKET_HOLIDAYS_MSK"),
@@ -225,5 +240,19 @@ export const config: AppConfig = {
   cache: {
     cbrKeyRateEnabled: getBoolean("CBR_KEY_RATE_CACHE_ENABLED", true),
     worldCloseEnabled: getBoolean("TV_WORLD_CLOSE_CACHE_ENABLED", true)
+  },
+  liveQuotes: {
+    enabled: getBoolean("LIVE_QUOTES_ENABLED", true),
+    tbankApiToken: getOptionalString("TBANK_API_TOKEN"),
+    tbankApiBaseUrl:
+      getOptionalString("TBANK_API_BASE_URL") ??
+      "https://invest-public-api.tbank.ru/rest",
+    tbankFuturesClassCode:
+      getOptionalString("TBANK_FUTURES_CLASS_CODE") ?? "SPBFUT",
+    tbankUsdRubSymbol:
+      getOptionalString("TBANK_USDRUB_SYMBOL") ??
+      getOptionalString("TV_USDRUBF_SYMBOL") ??
+      "USDRUBF",
+    tbankOrderbookDepth: getNumber("TBANK_ORDERBOOK_DEPTH", 1)
   }
 };

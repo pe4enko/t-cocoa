@@ -9,8 +9,8 @@
 
 ## Источники данных
 
-- локальное какао: `MOEX ISS`
-- курс доллара: `USDRUBF` из TradingView
+- локальное какао: в обычном режиме `MOEX ISS`, в live-режиме через `T-Bank Invest API`
+- курс доллара: в обычном режиме `USDRUBF` из TradingView, в live-режиме через `T-Bank Invest API`
 - зарубежное какао на закрытии: `COCOA` из TradingView
 - ставка для расчетного базиса: ключевая ставка ЦБ РФ или ручной override через `.env`
 
@@ -65,10 +65,17 @@ pnpm start
 
 - `BOT_TOKEN` — токен Telegram-бота
 - `RU_COCOA_ASSET_CODE` — код базового актива MOEX для автопоиска контрактов
-- `TV_USDRUBF_SYMBOL` — символ курса доллара в TradingView
+- `TV_USDRUBF_SYMBOL` — fallback-символ курса доллара в TradingView для обычного режима
 - `TV_WORLD_COCOA_SYMBOL` — символ зарубежного какао в TradingView
+- `LIVE_QUOTES_ENABLED` — включает live-режим для локального какао и `USDRUBF` через `T-Bank Invest API`
+- `TBANK_API_TOKEN` — токен `T-Bank Invest API`
+- `TBANK_API_BASE_URL` — базовый URL REST API `T-Bank Invest`
+- `TBANK_FUTURES_CLASS_CODE` — class code фьючерсов для запросов по тикеру, по умолчанию `SPBFUT`
+- `TBANK_USDRUB_SYMBOL` — тикер долларового фьючерса для live-режима
+- `TBANK_ORDERBOOK_DEPTH` — глубина стакана для live-режима
 - `FOREIGN_OPEN_TIME_MSK` — время открытия внешнего рынка в формате `HH:mm`
 - `FOREIGN_CLOSE_TIME_MSK` — время закрытия внешнего рынка в формате `HH:mm`
+- `FOREIGN_MARKET_SESSION_CHECK_ENABLED` — включает блокировку расчета во время торгов внешнего рынка; для временного отключения можно поставить `false`
 - `FOREIGN_MARKET_HOLIDAYS_MSK` — полные праздничные нерабочие даты через запятую
 - `FAIR_BASIS_RATE_PCT` — ручной override ставки; если пусто, ставка берется с сайта ЦБ РФ
 - `FAIR_BASIS_DAY_COUNT` — база дней для carry-модели
@@ -156,10 +163,17 @@ PRUNE_OLD_IMAGES=true ./update-ghcr.sh
 
 ## Важные замечания
 
-- локальная цена берется напрямую из `MOEX ISS`, а не из TradingView
+- если `LIVE_QUOTES_ENABLED=true` и задан `TBANK_API_TOKEN`, локальное какао и `USDRUBF` берутся через `T-Bank Invest API`
+- цены фьючерсов из `T-Bank` нормализуются до цены за единицу базового актива: для `USDRUBF` это курс за 1 доллар, для какао — цена за 1 кг
+- для локального какао в live-режиме бот сначала пытается использовать лучшие `bid/ask`, а если стакан пустой, падает обратно на `last price`
+- для `USDRUBF` в live-режиме бот берет прямой `last price` из `T-Bank`
+- если `TBANK_API_TOKEN` не задан или `T-Bank Invest API` не ответил, бот автоматически возвращается к старым источникам
+- через `LIVE_QUOTES_ENABLED=false` можно полностью отключить live-режим
 - контракт выбирается автоматически как ближайший неистекший по `LASTTRADEDATE`
 - если указать тикер вручную, например `/cocoa CCM6`, бот использует именно его
+- `COCOA` по-прежнему берется как цена закрытия из TradingView, мы его не переводили на новый источник
 - в интервале между открытием и закрытием внешнего рынка бот не строит расчет и просит дождаться закрытия
+- если нужно временно разрешить расчет и во время внешней сессии, можно поставить `FOREIGN_MARKET_SESSION_CHECK_ENABLED=false`
 - по выходным и праздникам внешний рынок считается закрытым, поэтому бот берет последнее закрытие предыдущего торгового дня
 - в `FOREIGN_MARKET_HOLIDAYS_MSK` нужно указывать только полные нерабочие дни; ранние закрытия туда добавлять не нужно
 - в каналах бот должен быть администратором, иначе он не сможет публиковать ответы

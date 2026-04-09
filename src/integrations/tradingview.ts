@@ -26,7 +26,14 @@ export class TradingViewService {
 
   constructor(private readonly config: AppConfig) {}
 
-  async getExternalSnapshot(): Promise<ExternalCocoaSnapshot> {
+  async getUsdRubSnapshot(): Promise<QuoteSnapshot> {
+    return this.fetchLatestSnapshot(this.config.usdRubSymbol);
+  }
+
+  async getWorldCloseSnapshot(): Promise<{
+    worldClose: QuoteSnapshot;
+    foreignCloseTarget: DateTime;
+  }> {
     const nowMsk = DateTime.now().setZone(this.config.marketTimeZone);
     const foreignCloseTarget = this.resolveForeignCloseTarget(nowMsk);
     const cachedWorldClose = this.config.cache.worldCloseEnabled
@@ -34,21 +41,13 @@ export class TradingViewService {
       : null;
 
     if (cachedWorldClose) {
-      const usdRub = await this.fetchLatestSnapshot(this.config.usdRubSymbol);
-
       return {
-        usdRub,
         worldClose: cachedWorldClose,
         foreignCloseTarget
       };
     }
 
-    const [usdRubCandles, worldCloseCandles] = await this.fetchCandles([
-      this.config.usdRubSymbol,
-      this.config.worldCocoaSymbol
-    ]);
-
-    const usdRub = this.getLatestSnapshot(this.config.usdRubSymbol, usdRubCandles);
+    const [worldCloseCandles] = await this.fetchCandles([this.config.worldCocoaSymbol]);
     const worldClose = this.getSnapshotAtOrBefore(
       this.config.worldCocoaSymbol,
       worldCloseCandles,
@@ -66,9 +65,21 @@ export class TradingViewService {
     }
 
     return {
-      usdRub,
       worldClose,
       foreignCloseTarget
+    };
+  }
+
+  async getExternalSnapshot(): Promise<ExternalCocoaSnapshot> {
+    const [usdRub, worldCloseSnapshot] = await Promise.all([
+      this.getUsdRubSnapshot(),
+      this.getWorldCloseSnapshot()
+    ]);
+
+    return {
+      usdRub,
+      worldClose: worldCloseSnapshot.worldClose,
+      foreignCloseTarget: worldCloseSnapshot.foreignCloseTarget
     };
   }
 

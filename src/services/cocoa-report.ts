@@ -12,6 +12,7 @@ import {
 import type { CocoaMarketSnapshot } from "../domain/market";
 import type { CbrKeyRateService } from "../integrations/cbr-key-rate";
 import type { MoexIssService } from "../integrations/moex-iss";
+import type { TBankInvestService } from "../integrations/tbank-invest";
 import type { TradingViewService } from "../integrations/tradingview";
 
 export interface CocoaReportRequest {
@@ -49,22 +50,24 @@ export class CocoaReportService {
   constructor(
     private readonly tradingViewService: TradingViewService,
     private readonly moexIssService: MoexIssService,
+    private readonly tbankInvestService: TBankInvestService,
     private readonly cbrKeyRateService: CbrKeyRateService,
     private readonly config: AppConfig
   ) {}
 
   async buildReport(request: CocoaReportRequest = {}): Promise<CocoaReport> {
     this.assertForeignMarketClosed();
-    const [localCocoa, externalSnapshot] = await Promise.all([
-      this.moexIssService.getLocalCocoaSnapshot(request.localSymbolOverride),
-      this.tradingViewService.getExternalSnapshot()
+    const [localCocoa, usdRub, worldCloseSnapshot] = await Promise.all([
+      this.resolveLocalCocoaSnapshot(request.localSymbolOverride),
+      this.resolveUsdRubSnapshot(),
+      this.tradingViewService.getWorldCloseSnapshot()
     ]);
 
     const snapshot: CocoaMarketSnapshot = {
       localCocoa,
-      usdRub: externalSnapshot.usdRub,
-      worldClose: externalSnapshot.worldClose,
-      foreignCloseTarget: externalSnapshot.foreignCloseTarget
+      usdRub,
+      worldClose: worldCloseSnapshot.worldClose,
+      foreignCloseTarget: worldCloseSnapshot.foreignCloseTarget
     };
     const fairBasis = await this.calculateFairBasis(
       snapshot.worldClose.price,
@@ -135,7 +138,44 @@ export class CocoaReportService {
     return this.cbrKeyRateService.getCurrentKeyRate();
   }
 
+  private async resolveUsdRubSnapshot() {
+    if (this.tbankInvestService.isEnabled()) {
+      try {
+        return await this.tbankInvestService.getUsdRubSnapshot();
+      } catch (error) {
+        console.warn(
+          "[live quotes] Falling back to TradingView for USDRUBF.",
+          error
+        );
+      }
+    }
+
+    return this.tradingViewService.getUsdRubSnapshot();
+  }
+
+  private async resolveLocalCocoaSnapshot(localSymbolOverride?: string) {
+    if (this.tbankInvestService.isEnabled()) {
+      try {
+        const contract = await this.moexIssService.resolveLocalCocoaContract(
+          localSymbolOverride
+        );
+        return await this.tbankInvestService.getLocalCocoaSnapshot(contract);
+      } catch (error) {
+        console.warn(
+          "[live quotes] Falling back to MOEX ISS for local cocoa contract.",
+          error
+        );
+      }
+    }
+
+    return this.moexIssService.getLocalCocoaSnapshot(localSymbolOverride);
+  }
+
   private assertForeignMarketClosed(now = DateTime.now().setZone(this.config.marketTimeZone)): void {
+    if (!this.config.foreignMarketSessionCheckEnabled) {
+      return;
+    }
+
     if (!isForeignMarketTradingDay(now, this.config.foreignMarketHolidaysMsk)) {
       return;
     }

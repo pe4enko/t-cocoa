@@ -1,6 +1,7 @@
 import { Bot, type Context } from "grammy";
 
 import type { AppConfig } from "./config";
+import { normalizeTradingViewCocoaSymbol } from "./domain/ice-cocoa-symbol";
 import {
   ForeignMarketOpenError,
   type CocoaReportService
@@ -79,7 +80,8 @@ async function handleCocoaCommand(
 
   try {
     const report = await reportService.buildReport({
-      localSymbolOverride: parsedArgs.localSymbolOverride
+      localSymbolOverride: parsedArgs.localSymbolOverride,
+      worldSymbolOverride: parsedArgs.worldSymbolOverride
     });
 
     await ctx.reply(formatCocoaReport(report, config.signalThresholds), {
@@ -159,35 +161,67 @@ function getHelpText(): string {
     `<b>Команды</b>`,
     `/cocoa`,
     `/cocoa CCJ6`,
+    `/cocoa world=ICEUS:CCK2026`,
+    `/cocoa CCJ6 world=ICEUS:CCK2026`,
     ``,
     `Без аргументов бот сам выбирает ближайший неистекший контракт на какао по MOEX.`,
-    `Если указать тикер, например CCJ6, бот посчитает отчет по этому контракту.`
+    `Если указать тикер, например CCJ6, бот посчитает отчет по этому контракту.`,
+    `Через world=... можно вручную задать зарубежный тикер TradingView для расчета.`
   ].join("\n");
 }
 
 function parseCocoaArgs(
   args: string[]
-): { localSymbolOverride?: string } | null {
-  const [firstArg, secondArg] = args;
-
-  if (!firstArg) {
+): { localSymbolOverride?: string; worldSymbolOverride?: string } | null {
+  if (args.length === 0) {
     return {};
   }
 
-  if (secondArg) {
+  if (args.length > 2) {
     return null;
   }
 
-  if (isAutoKeyword(firstArg)) {
-    return {};
-  }
+  let localSymbolOverride: string | undefined;
+  let worldSymbolOverride: string | undefined;
 
-  if (looksLikeNumber(firstArg)) {
-    return null;
+  for (const arg of args) {
+    if (isAutoKeyword(arg)) {
+      continue;
+    }
+
+    if (looksLikeNumber(arg)) {
+      return null;
+    }
+
+    const keyedWorldSymbol = extractWorldSymbolArg(arg);
+    if (keyedWorldSymbol) {
+      if (worldSymbolOverride) {
+        return null;
+      }
+
+      worldSymbolOverride = keyedWorldSymbol;
+      continue;
+    }
+
+    if (looksLikeTradingViewWorldSymbol(arg)) {
+      if (worldSymbolOverride) {
+        return null;
+      }
+
+      worldSymbolOverride = normalizeWorldSymbolInput(arg);
+      continue;
+    }
+
+    if (localSymbolOverride) {
+      return null;
+    }
+
+    localSymbolOverride = arg;
   }
 
   return {
-    localSymbolOverride: firstArg
+    localSymbolOverride,
+    worldSymbolOverride
   };
 }
 
@@ -199,6 +233,34 @@ function isAutoKeyword(value: string): boolean {
 function looksLikeNumber(value: string): boolean {
   const normalizedValue = Number(value.replace(",", "."));
   return !Number.isNaN(normalizedValue);
+}
+
+function extractWorldSymbolArg(value: string): string | null {
+  const match = value.match(/^(world|ice|tv)=(.+)$/i);
+  if (!match) {
+    return null;
+  }
+
+  const symbol = match[2]?.trim();
+  if (!symbol) {
+    return null;
+  }
+
+  return normalizeWorldSymbolInput(symbol);
+}
+
+function looksLikeTradingViewWorldSymbol(value: string): boolean {
+  const trimmed = value.trim().toUpperCase();
+
+  return (
+    trimmed.includes(":") ||
+    trimmed === "CC1!" ||
+    /^CC[HKNUZ]\d{4}$/.test(trimmed)
+  );
+}
+
+function normalizeWorldSymbolInput(value: string): string {
+  return normalizeTradingViewCocoaSymbol(value);
 }
 
 function formatClock(value: { toFormat: (format: string) => string }): string {

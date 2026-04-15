@@ -6,6 +6,7 @@ export interface QuoteSnapshot {
   price: number;
   observedAt: DateTime;
   sourceLabel: string;
+  resolutionSourceLabel?: string;
   expiresAt?: DateTime;
 }
 

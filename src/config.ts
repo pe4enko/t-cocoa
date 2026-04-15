@@ -1,6 +1,11 @@
 import { DateTime } from "luxon";
 import dotenv from "dotenv";
 
+import {
+  isLegacyGenericCocoaSymbol,
+  normalizeTradingViewCocoaSymbol
+} from "./domain/ice-cocoa-symbol";
+
 dotenv.config();
 
 const MOSCOW_TIME_ZONE = "Europe/Moscow";
@@ -24,6 +29,13 @@ export interface FairBasisConfig {
 export interface CacheConfig {
   cbrKeyRateEnabled: boolean;
   worldCloseEnabled: boolean;
+  iceCocoaExpiryEnabled: boolean;
+}
+
+export interface IceCocoaExpiryFallbackEntryConfig {
+  contractLabel: string;
+  finalSettlementDate: string;
+  tradingViewSymbol: string;
 }
 
 export interface LiveQuoteConfig {
@@ -47,7 +59,9 @@ export interface AppConfig {
   botToken: string;
   ruCocoaAssetCode: string;
   usdRubSymbol: string;
-  worldCocoaSymbol: string;
+  worldCocoaSymbolOverride?: string;
+  worldCocoaContinuousSymbol: string;
+  iceCocoaExpiryFallbackEntries: IceCocoaExpiryFallbackEntryConfig[];
   foreignMarketSessionCheckEnabled: boolean;
   foreignOpenTimeMsk: ClockTime;
   foreignCloseTimeMsk: ClockTime;
@@ -207,11 +221,64 @@ function getOptionalIsoDateSet(name: string): Set<string> {
   return new Set(normalizedValues);
 }
 
+function getIceCocoaExpiryFallbackEntries(
+  name: string
+): IceCocoaExpiryFallbackEntryConfig[] {
+  const raw = process.env[name]?.trim();
+  if (!raw) {
+    return [];
+  }
+
+  return raw
+    .split(";")
+    .map((chunk) => chunk.trim())
+    .filter(Boolean)
+    .map((chunk) => {
+      const [contractLabelRaw, finalSettlementDateRaw, tradingViewSymbolRaw] = chunk
+        .split("|")
+        .map((part) => part.trim());
+
+      if (!contractLabelRaw || !finalSettlementDateRaw || !tradingViewSymbolRaw) {
+        throw new Error(
+          `Environment variable ${name} must contain entries in CONTRACT|YYYY-MM-DD|SYMBOL format separated by semicolons.`
+        );
+      }
+
+      const parsedDate = DateTime.fromISO(finalSettlementDateRaw, {
+        zone: MOSCOW_TIME_ZONE
+      });
+
+      if (!parsedDate.isValid || parsedDate.toISODate() !== finalSettlementDateRaw) {
+        throw new Error(
+          `Environment variable ${name} must contain valid ISO dates in YYYY-MM-DD format.`
+        );
+      }
+
+      return {
+        contractLabel: contractLabelRaw,
+        finalSettlementDate: finalSettlementDateRaw,
+        tradingViewSymbol: normalizeTradingViewCocoaSymbol(tradingViewSymbolRaw)
+      };
+    });
+}
+
 export const config: AppConfig = {
   botToken: getRequiredString("BOT_TOKEN"),
   ruCocoaAssetCode: getOptionalString("RU_COCOA_ASSET_CODE") ?? "COCOA",
   usdRubSymbol: getOptionalString("TV_USDRUBF_SYMBOL") ?? "USDRUBF",
-  worldCocoaSymbol: getOptionalString("TV_WORLD_COCOA_SYMBOL") ?? "COCOA",
+  worldCocoaSymbolOverride: (() => {
+    const value = getOptionalString("TV_WORLD_COCOA_SYMBOL");
+    if (!value || isLegacyGenericCocoaSymbol(value)) {
+      return undefined;
+    }
+
+    return value;
+  })(),
+  worldCocoaContinuousSymbol:
+    getOptionalString("TV_WORLD_COCOA_CONTINUOUS_SYMBOL") ?? "ICEUS:CC1!",
+  iceCocoaExpiryFallbackEntries: getIceCocoaExpiryFallbackEntries(
+    "ICE_COCOA_EXPIRY_FALLBACK_ENTRIES"
+  ),
   foreignMarketSessionCheckEnabled: getBoolean(
     "FOREIGN_MARKET_SESSION_CHECK_ENABLED",
     true
@@ -242,7 +309,8 @@ export const config: AppConfig = {
   },
   cache: {
     cbrKeyRateEnabled: getBoolean("CBR_KEY_RATE_CACHE_ENABLED", true),
-    worldCloseEnabled: getBoolean("TV_WORLD_CLOSE_CACHE_ENABLED", true)
+    worldCloseEnabled: getBoolean("TV_WORLD_CLOSE_CACHE_ENABLED", true),
+    iceCocoaExpiryEnabled: getBoolean("ICE_COCOA_EXPIRY_CACHE_ENABLED", true)
   },
   liveQuotes: {
     enabled: getBoolean("LIVE_QUOTES_ENABLED", true),

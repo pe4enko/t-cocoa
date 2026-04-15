@@ -17,6 +17,7 @@ import type { TradingViewService } from "../integrations/tradingview";
 
 export interface CocoaReportRequest {
   localSymbolOverride?: string;
+  worldSymbolOverride?: string;
 }
 
 export interface CocoaReport {
@@ -57,10 +58,17 @@ export class CocoaReportService {
 
   async buildReport(request: CocoaReportRequest = {}): Promise<CocoaReport> {
     this.assertForeignMarketClosed();
+    const localContract = await this.moexIssService.resolveLocalCocoaContract(
+      request.localSymbolOverride
+    );
+
     const [localCocoa, usdRub, worldCloseSnapshot] = await Promise.all([
-      this.resolveLocalCocoaSnapshot(request.localSymbolOverride),
+      this.resolveLocalCocoaSnapshot(localContract),
       this.resolveUsdRubSnapshot(),
-      this.tradingViewService.getWorldCloseSnapshot()
+      this.tradingViewService.getWorldCloseSnapshot({
+        localContract,
+        worldSymbolOverride: request.worldSymbolOverride
+      })
     ]);
 
     const snapshot: CocoaMarketSnapshot = {
@@ -153,13 +161,10 @@ export class CocoaReportService {
     return this.tradingViewService.getUsdRubSnapshot();
   }
 
-  private async resolveLocalCocoaSnapshot(localSymbolOverride?: string) {
+  private async resolveLocalCocoaSnapshot(localContract: CocoaMarketSnapshot["localCocoa"]) {
     if (this.tbankInvestService.isEnabled()) {
       try {
-        const contract = await this.moexIssService.resolveLocalCocoaContract(
-          localSymbolOverride
-        );
-        return await this.tbankInvestService.getLocalCocoaSnapshot(contract);
+        return await this.tbankInvestService.getLocalCocoaSnapshot(localContract);
       } catch (error) {
         console.warn(
           "[live quotes] Falling back to MOEX ISS for local cocoa contract.",
@@ -168,7 +173,7 @@ export class CocoaReportService {
       }
     }
 
-    return this.moexIssService.getLocalCocoaSnapshot(localSymbolOverride);
+    return this.moexIssService.getLocalCocoaSnapshot(localContract.symbol);
   }
 
   private assertForeignMarketClosed(now = DateTime.now().setZone(this.config.marketTimeZone)): void {

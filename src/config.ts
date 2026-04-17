@@ -284,7 +284,7 @@ export const config: AppConfig = {
     true
   ),
   foreignOpenTimeMsk: getTime("FOREIGN_OPEN_TIME_MSK", "11:45"),
-  foreignCloseTimeMsk: getTime("FOREIGN_CLOSE_TIME_MSK", "20:29"),
+  foreignCloseTimeMsk: getTime("FOREIGN_CLOSE_TIME_MSK", "20:30"),
   foreignMarketHolidaysMsk: getOptionalIsoDateSet("FOREIGN_MARKET_HOLIDAYS_MSK"),
   timeframeMinutes: getNumber("TV_TIMEFRAME_MINUTES", 1),
   lookbackBars: getNumber("TV_LOOKBACK_BARS", 3000),

@@ -14,12 +14,16 @@ export class CbrKeyRateService {
 
   constructor(private readonly config: AppConfig) {}
 
+  clearCache(): void {
+    this.cachedSnapshot = undefined;
+    this.cachedUntilMillis = undefined;
+  }
+
   async getCurrentKeyRate(): Promise<KeyRateSnapshot> {
     const now = DateTime.now().setZone(this.config.marketTimeZone);
 
     if (!this.config.cache.cbrKeyRateEnabled) {
-      this.cachedSnapshot = undefined;
-      this.cachedUntilMillis = undefined;
+      this.clearCache();
       return this.fetchCurrentKeyRate();
     }
 

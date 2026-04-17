@@ -80,6 +80,13 @@ export class TBankInvestService {
 
   constructor(private readonly config: AppConfig) {}
 
+  clearCache(): void {
+    this.metadataCache.clear();
+    this.customCaPromise = undefined;
+    this.insecureTlsWarningShown = false;
+    this.tlsConfigurationLogged = false;
+  }
+
   isEnabled(): boolean {
     return this.config.liveQuotes.enabled && Boolean(this.config.liveQuotes.tbankApiToken);
   }

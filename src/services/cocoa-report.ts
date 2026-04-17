@@ -6,11 +6,11 @@ import {
   type CocoaCalculationResult
 } from "../domain/cocoa-calculator";
 import {
-  buildForeignMarketSession,
   isForeignMarketTradingDay
 } from "../domain/foreign-market-calendar";
 import type { CocoaMarketSnapshot } from "../domain/market";
 import type { CbrKeyRateService } from "../integrations/cbr-key-rate";
+import type { IceCocoaHoursService } from "../integrations/ice-cocoa-hours";
 import type { MoexIssService } from "../integrations/moex-iss";
 import type { TBankInvestService } from "../integrations/tbank-invest";
 import type { TradingViewService } from "../integrations/tradingview";
@@ -53,11 +53,19 @@ export class CocoaReportService {
     private readonly moexIssService: MoexIssService,
     private readonly tbankInvestService: TBankInvestService,
     private readonly cbrKeyRateService: CbrKeyRateService,
+    private readonly iceCocoaHoursService: IceCocoaHoursService,
     private readonly config: AppConfig
   ) {}
 
+  clearCaches(): void {
+    this.tradingViewService.clearCache();
+    this.cbrKeyRateService.clearCache();
+    this.iceCocoaHoursService.clearCache();
+    this.tbankInvestService.clearCache();
+  }
+
   async buildReport(request: CocoaReportRequest = {}): Promise<CocoaReport> {
-    this.assertForeignMarketClosed();
+    await this.assertForeignMarketClosed();
     const localContract = await this.moexIssService.resolveLocalCocoaContract(
       request.localSymbolOverride
     );
@@ -176,7 +184,9 @@ export class CocoaReportService {
     return this.moexIssService.getLocalCocoaSnapshot(localContract.symbol);
   }
 
-  private assertForeignMarketClosed(now = DateTime.now().setZone(this.config.marketTimeZone)): void {
+  private async assertForeignMarketClosed(
+    now = DateTime.now().setZone(this.config.marketTimeZone)
+  ): Promise<void> {
     if (!this.config.foreignMarketSessionCheckEnabled) {
       return;
     }
@@ -185,11 +195,8 @@ export class CocoaReportService {
       return;
     }
 
-    const { marketOpenTime, marketCloseTime } = buildForeignMarketSession(
-      now,
-      this.config.foreignOpenTimeMsk,
-      this.config.foreignCloseTimeMsk
-    );
+    const { marketOpenTime, marketCloseTime } =
+      await this.iceCocoaHoursService.buildSession(now);
 
     if (now >= marketOpenTime && now < marketCloseTime) {
       throw new ForeignMarketOpenError(

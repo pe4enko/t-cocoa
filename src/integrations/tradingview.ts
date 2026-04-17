@@ -7,11 +7,9 @@ import {
   normalizeTradingViewCocoaSymbol,
   resolveIceUsCocoaSymbolForExpiry
 } from "../domain/ice-cocoa-symbol";
-import {
-  resolveForeignMarketCloseTarget,
-  resolveNextForeignMarketOpen
-} from "../domain/foreign-market-calendar";
+import { resolveNextForeignMarketOpen } from "../domain/foreign-market-calendar";
 import type { QuoteSnapshot } from "../domain/market";
+import type { IceCocoaHoursService } from "./ice-cocoa-hours";
 
 export interface ExternalCocoaSnapshot {
   usdRub: QuoteSnapshot;
@@ -54,7 +52,15 @@ export class TradingViewService {
   private cachedWorldClose?: WorldCloseCacheEntry;
   private cachedIceCocoaExpiry?: IceCocoaExpiryCacheEntry;
 
-  constructor(private readonly config: AppConfig) {}
+  constructor(
+    private readonly config: AppConfig,
+    private readonly iceCocoaHoursService: IceCocoaHoursService
+  ) {}
+
+  clearCache(): void {
+    this.cachedWorldClose = undefined;
+    this.cachedIceCocoaExpiry = undefined;
+  }
 
   async getUsdRubSnapshot(): Promise<QuoteSnapshot> {
     return this.fetchLatestSnapshot(this.config.usdRubSymbol);
@@ -65,7 +71,7 @@ export class TradingViewService {
     foreignCloseTarget: DateTime;
   }> {
     const nowMsk = DateTime.now().setZone(this.config.marketTimeZone);
-    const foreignCloseTarget = this.resolveForeignCloseTarget(nowMsk);
+    const foreignCloseTarget = await this.resolveForeignCloseTarget(nowMsk);
     const resolvedWorldSymbol = await this.resolveWorldCocoaSymbol(request);
     const worldSymbol = resolvedWorldSymbol.symbol;
     const cachedWorldClose = this.config.cache.worldCloseEnabled
@@ -90,12 +96,15 @@ export class TradingViewService {
     );
     worldClose.resolutionSourceLabel = resolvedWorldSymbol.resolutionSourceLabel;
 
-    if (this.config.cache.worldCloseEnabled) {
+    if (
+      this.config.cache.worldCloseEnabled &&
+      this.isFinalWorldClose(worldClose, foreignCloseTarget)
+    ) {
       this.cachedWorldClose = {
         snapshot: worldClose,
         symbol: worldSymbol,
         foreignCloseTarget,
-        validUntil: this.resolveWorldCloseCacheUntil(nowMsk)
+        validUntil: await this.resolveWorldCloseCacheUntil(nowMsk)
       };
     } else {
       this.cachedWorldClose = undefined;
@@ -120,19 +129,40 @@ export class TradingViewService {
     };
   }
 
-  private resolveForeignCloseTarget(nowMsk: DateTime): DateTime {
-    return resolveForeignMarketCloseTarget(
-      nowMsk,
-      this.config.foreignCloseTimeMsk,
-      this.config.foreignMarketHolidaysMsk
-    );
+  private async resolveForeignCloseTarget(nowMsk: DateTime): Promise<DateTime> {
+    let session = await this.iceCocoaHoursService.buildSession(nowMsk);
+
+    if (nowMsk < session.marketCloseTime) {
+      session = await this.iceCocoaHoursService.buildSession(nowMsk.minus({ days: 1 }));
+    }
+
+    while (!this.isTradingDay(session.marketCloseTime)) {
+      session = await this.iceCocoaHoursService.buildSession(
+        session.marketCloseTime.minus({ days: 1 })
+      );
+    }
+
+    return session.marketCloseTime;
   }
 
-  private resolveWorldCloseCacheUntil(nowMsk: DateTime): DateTime {
-    return resolveNextForeignMarketOpen(
-      nowMsk,
-      this.config.foreignOpenTimeMsk,
-      this.config.foreignMarketHolidaysMsk
+  private async resolveWorldCloseCacheUntil(nowMsk: DateTime): Promise<DateTime> {
+    let nextOpenCandidate = nowMsk.plus({ days: 1 });
+
+    while (!this.isTradingDay(nextOpenCandidate)) {
+      nextOpenCandidate = nextOpenCandidate.plus({ days: 1 });
+    }
+
+    const nextSession = await this.iceCocoaHoursService.buildSession(nextOpenCandidate);
+    return nextSession.marketOpenTime;
+  }
+
+  private isFinalWorldClose(
+    snapshot: QuoteSnapshot,
+    foreignCloseTarget: DateTime
+  ): boolean {
+    return (
+      snapshot.observedAt.startOf("minute").toMillis() >=
+      foreignCloseTarget.startOf("minute").toMillis()
     );
   }
 
@@ -162,6 +192,13 @@ export class TradingViewService {
     }
 
     return this.cachedWorldClose.snapshot;
+  }
+
+  private isTradingDay(value: DateTime): boolean {
+    return (
+      value.weekday <= 5 &&
+      !this.config.foreignMarketHolidaysMsk.has(value.toISODate() ?? "")
+    );
   }
 
   private async resolveWorldCocoaSymbol(

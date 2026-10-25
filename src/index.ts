@@ -6,6 +6,7 @@ import { MoexIssService } from "./integrations/moex-iss";
 import { TBankInvestService } from "./integrations/tbank-invest";
 import { TradingViewService } from "./integrations/tradingview";
 import { CocoaReportService } from "./services/cocoa-report";
+import { UsageStatisticsService } from "./services/usage-statistics";
 
 async function main(): Promise<void> {
   const iceCocoaHoursService = new IceCocoaHoursService(config);
@@ -21,7 +22,8 @@ async function main(): Promise<void> {
     iceCocoaHoursService,
     config
   );
-  const bot = createBot(config, reportService);
+  const statistics = await UsageStatisticsService.open(config.statisticsFilePath);
+  const bot = createBot(config, reportService, statistics);
 
   await bot.init();
   await registerCommands(bot);

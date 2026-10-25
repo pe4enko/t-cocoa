@@ -8,3 +8,8 @@ services:
     environment:
       TBANK_CA_CERT_PATH: ${TBANK_CA_CERT_PATH:-certs/TINKOFFBANK-ROOTCA.pem}
     init: true
+    volumes:
+      - bot-data:/app/data
+
+volumes:
+  bot-data:

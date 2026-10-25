@@ -1,4 +1,4 @@
-import { Bot, type Context } from "grammy";
+import { Bot, InputFile, type Context } from "grammy";
 
 import type { AppConfig } from "./config";
 import { normalizeTradingViewCocoaSymbol } from "./domain/ice-cocoa-symbol";
@@ -7,6 +7,7 @@ import {
   type CocoaReportService
 } from "./services/cocoa-report";
 import { formatCocoaReport } from "./utils/format";
+import type { UsageStatisticsService } from "./services/usage-statistics";
 
 interface ParsedCommand {
   name: string;
@@ -15,7 +16,8 @@ interface ParsedCommand {
 
 export function createBot(
   config: AppConfig,
-  reportService: CocoaReportService
+  reportService: CocoaReportService,
+  statistics: UsageStatisticsService
 ): Bot {
   const bot = new Bot(config.botToken);
 
@@ -37,6 +39,56 @@ export function createBot(
     if (!isChatAllowed(ctx, config)) {
       await ctx.reply("Этот чат не входит в список разрешенных для бота.");
       return;
+    }
+
+    if (parsedCommand.name === "stats") {
+      if (ctx.chat?.type !== "private" || !ctx.from || !config.adminUserIds.has(ctx.from.id)) {
+        await ctx.reply("Статистика доступна только администраторам в личном чате с ботом.");
+        return;
+      }
+      const snapshot = await statistics.snapshot();
+      if (parsedCommand.args[0]?.toLowerCase() === "users") {
+        await ctx.replyWithDocument(new InputFile(
+          Buffer.from(JSON.stringify(Object.values(snapshot.users), null, 2)),
+          "bot-users.json"
+        ));
+      } else {
+        await ctx.reply([
+          "Статистика бота",
+          `С начала сбора: ${snapshot.startedAt}`,
+          `Всего использований: ${snapshot.totalUses}`,
+          `Уникальных пользователей: ${Object.keys(snapshot.users).length}`,
+          `Чатов: ${Object.keys(snapshot.chats).length}`,
+          `Без доступного пользователя: ${snapshot.anonymousUses}`,
+          `/cocoa: ${snapshot.commands.cocoa}`,
+          `/start: ${snapshot.commands.start}`,
+          `/help: ${snapshot.commands.help}`,
+          "Профили и счётчики пользователей: /stats users"
+        ].join("\n"));
+      }
+      return;
+    }
+
+    if (["start", "help", "cocoa"].includes(parsedCommand.name)) {
+      // Channel posts and anonymous group admins cannot identify a real user.
+      const user = !ctx.msg?.sender_chat && ctx.from && !ctx.from.is_bot ? ctx.from : undefined;
+      try {
+        await statistics.record({
+          updateId: ctx.update.update_id,
+          command: parsedCommand.name as "start" | "help" | "cocoa",
+          user: user ? {
+            id: user.id, firstName: user.first_name, lastName: user.last_name,
+            username: user.username, languageCode: user.language_code,
+            isPremium: user.is_premium
+          } : undefined,
+          chat: ctx.chat ? {
+            id: ctx.chat.id, type: ctx.chat.type,
+            title: "title" in ctx.chat ? ctx.chat.title : undefined
+          } : undefined
+        });
+      } catch (error) {
+        console.error("Failed to save usage statistics:", error);
+      }
     }
 
     switch (parsedCommand.name) {

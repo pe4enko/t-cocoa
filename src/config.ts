@@ -71,6 +71,8 @@ export interface AppConfig {
   tradingViewSessionId?: string;
   moexIssBaseUrl: string;
   allowedChatIds: Set<number> | null;
+  adminUserIds: Set<number>;
+  statisticsFilePath: string;
   marketTimeZone: string;
   signalThresholds: SignalThresholds;
   fairBasis: FairBasisConfig;
@@ -196,6 +198,15 @@ function getAllowedChatIds(): Set<number> | null {
   return new Set(ids);
 }
 
+function getAdminUserIds(): Set<number> {
+  const values = (getOptionalString("BOT_ADMIN_USER_IDS") ?? "")
+    .split(",").map((value) => value.trim()).filter(Boolean);
+  if (values.some((value) => !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) <= 0)) {
+    throw new Error("BOT_ADMIN_USER_IDS must contain only positive integer user ids.");
+  }
+  return new Set(values.map(Number));
+}
+
 function getOptionalIsoDateSet(name: string): Set<string> {
   const raw = process.env[name]?.trim();
   if (!raw) {
@@ -291,6 +302,8 @@ export const config: AppConfig = {
   tradingViewSessionId: getOptionalString("TV_SESSION_ID"),
   moexIssBaseUrl: getOptionalString("MOEX_ISS_BASE_URL") ?? "https://iss.moex.com",
   allowedChatIds: getAllowedChatIds(),
+  adminUserIds: getAdminUserIds(),
+  statisticsFilePath: getOptionalString("BOT_STATISTICS_FILE_PATH") ?? "data/usage-statistics.json",
   marketTimeZone: MOSCOW_TIME_ZONE,
   signalThresholds: {
     neutralSpreadRub: getNumber("SIGNAL_NEUTRAL_SPREAD_RUB", 0.25),

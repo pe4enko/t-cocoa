@@ -8,3 +8,4 @@ dist
 compose*.yml
 compose*.yaml
 README.md
+data
